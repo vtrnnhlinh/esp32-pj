@@ -8,8 +8,8 @@
 #define GREEN_PIN 16                      // Pin Green of RGB
 #define BLUE_PIN  17                      // Pin Blue of RGB
 
-const char* ssid = "Zeg";           // Replace with your Wi-Fi SSID
-const char* password = "1convit2";   // Replace with your Wi-Fi password
+const char* ssid = "Your-Wifi-Hotspot";           // Replace with your Wi-Fi SSID
+const char* password = "password";   // Replace with your Wi-Fi password
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);       // I2C address 0x27, 16x2 LCD
 DHT dht11(DHT11_PIN, DHT11);
