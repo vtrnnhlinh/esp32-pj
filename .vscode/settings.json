@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "TKLL": "verilog",
+        "random": "cpp"
+    }
+}
