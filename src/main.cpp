@@ -4,35 +4,63 @@
 #include "ESPAsyncWebServer.h"
 
 #define DHTTYPE DHT11                     // DHT 11
-#define DHT11_PIN 23                      // Pin cảm biến DHT11 kết nối với ESP32
-#define RED_PIN   15                      // Pin Red of RGB
-#define GREEN_PIN 16                      // Pin Green of RGB
-#define BLUE_PIN  17                      // Pin Blue of RGB
+#define DHT11_PIN 23                      // DHT11 sensor connected to pin 23 on ESP32
+#define RED_PIN   15                      // RGB LED Red pin
+#define GREEN_PIN 16                      // RGB LED Green pin
+#define BLUE_PIN  17                      // RGB LED Blue pin
 
-const char* ssid = "Nga.Ntt";            // SSID Wi-Fi
-const char* password = "08032004";       // Mật khẩu Wi-Fi
+const char* ssid = "Nga.Ntt";            // Wi-Fi SSID
+const char* password = "08032004";       // Wi-Fi password
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);      // Địa chỉ I2C 0x27, LCD 16x2
-DHT dht11(DHT11_PIN, DHT11);             // Khởi tạo đối tượng DHT
+LiquidCrystal_I2C lcd(0x27, 16, 2);      // LCD screen with I2C address 0x27 and size 16x2
+DHT dht11(DHT11_PIN, DHT11);             // DHT11 sensor initialization
 
-AsyncWebServer server(80);               // Khởi tạo server trên cổng 80
+AsyncWebServer server(80);               // Web server on port 80
 
+/* Timer variables for millis() */
+unsigned long previousMillis = 0;        // Store time for tasks that require delay
+unsigned long previousFlashMillis = 0;   // Store time for RGB LED flashing
+unsigned long lastWiFiCheck = 0;         // Time to check Wi-Fi status
+
+int flashState = 0;                      // State of the flashing RGB LED
+int flashCount = 0;                      // Count for the number of LED flashes
+
+const int interval = 2000;               // Update interval for LCD every 2 seconds
+const int flashInterval = 200;           // Flash interval for RGB LED every 200ms
+const int WiFiCheckInterval = 3000;      // Wi-Fi check interval every 3 seconds
+
+/*SET color for led*/
 void setColor(bool red, bool green, bool blue) {
   digitalWrite(RED_PIN, red ? LOW : HIGH);
   digitalWrite(GREEN_PIN, green ? LOW : HIGH);
   digitalWrite(BLUE_PIN, blue ? LOW : HIGH);
 }
 
+// Function to flash RGB LED with millis()
 void flashColor(bool red, bool green, bool blue, int delayTime) {
-  for (int i = 0; i < 5; i++) {
-    setColor(red, green, blue);
-    delay(delayTime);
-    setColor(HIGH, HIGH, HIGH);
-    delay(delayTime);
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousFlashMillis >= delayTime) {
+    previousFlashMillis = currentMillis;  // Update time
+
+    if (flashState == 0) { 
+      flashState = 1;
+    } else {
+      setColor(HIGH, HIGH, HIGH);  
+      flashState = 0;
+      flashCount++;  
+    }
+  }
+
+  // Stop flashing after 10 flashes
+  if (flashCount >= 10) {
+    flashState = 0;
+    flashCount = 0;
+    setColor(red, green, blue);           // ON flashed led 
   }
 }
 
-// Hàm đọc nhiệt độ
+// Function to read temperature from DHT sensor
 String readDHTTemperature() {
   float t = dht11.readTemperature();
   if (isnan(t)) {
@@ -43,7 +71,7 @@ String readDHTTemperature() {
   }
 }
 
-// Hàm đọc độ ẩm
+// Function to read humidity from DHT sensor
 String readDHTHumidity() {
   float h = dht11.readHumidity();
   if (isnan(h)) {
@@ -54,7 +82,7 @@ String readDHTHumidity() {
   }
 }
 
-// Trang HTML cho Webserver
+/*============================HTML template for the web server=========================*/
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
@@ -112,7 +140,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 <body>
   <h2>ESP32 Weather Station</h2>
   
-  <!-- Khung Nhiệt Độ -->
+  <!-- Temperature Box -->
   <div class="box temperature-box">
     <div class="box-header">
       <i class="fas fa-thermometer-half" style="color:#059e8a;"></i>
@@ -124,7 +152,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
   </div>
   
-  <!-- Khung Độ Ẩm -->
+  <!-- Humidity Box -->
   <div class="box humidity-box">
     <div class="box-header">
       <i class="fas fa-tint" style="color:#00add6;"></i>
@@ -137,7 +165,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   </div>
 </body>
 <script>
-  // Cập nhật nhiệt độ mỗi 10 giây
+  // Update temperature every 2 seconds
   setInterval(function () {
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
@@ -147,8 +175,9 @@ const char index_html[] PROGMEM = R"rawliteral(
     };
     xhttp.open("GET", "/temperature", true);
     xhttp.send();
-  }, 10000);
+  }, 2000);
 
+  // Update humidity every 2 seconds
   setInterval(function () {
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function () {
@@ -161,8 +190,9 @@ const char index_html[] PROGMEM = R"rawliteral(
   }, 2000);
 </script>
 </html>)rawliteral";
+/*===================HTML template for the web server==================*/
 
-// Thay thế các placeholder trong HTML với giá trị nhiệt độ và độ ẩm
+/*=====Process the placeholders in the HTML with actual data===========*/
 String processor(const String &var) {
   if (var == "TEMPERATURE") {
     return readDHTTemperature();
@@ -176,31 +206,32 @@ String processor(const String &var) {
 void setup() {
   Serial.begin(9600);
 
-  // Khởi tạo cảm biến DHT
+  // Initialize DHT sensor
   dht11.begin();
 
-  // Khởi tạo LCD
+  // Initialize LCD
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
   lcd.print("Connecting WiFi...");
 
-  // Initialize RGB LED
+  // Initialize RGB LED pins
   pinMode(RED_PIN, OUTPUT);
   pinMode(GREEN_PIN, OUTPUT);
   pinMode(BLUE_PIN, OUTPUT);
 
-  // Kết nối Wi-Fi
+  // Connect to Wi-Fi
   WiFi.begin(ssid, password);
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-    delay(3000);
-    Serial.println("Connecting to WiFi...");
-    attempts++;
+    if (millis() - lastWiFiCheck >= WiFiCheckInterval) {
+      Serial.println("Connecting to WiFi...");
+      lastWiFiCheck = millis();
+    }
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    // Hiển thị địa chỉ IP khi kết nối thành công
+    // Display IP address when Wi-Fi is connected
     Serial.println(WiFi.localIP());
     lcd.clear();
     lcd.setCursor(0, 0);
@@ -208,73 +239,73 @@ void setup() {
     lcd.setCursor(0, 1);
     lcd.print(WiFi.localIP());
   } else {
-    // Thông báo lỗi nếu không thể kết nối
+    // Display error message if Wi-Fi connection fails
     Serial.println("WiFi connection failed");
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("WiFi Failed");
   }
 
-  // Cấu hình server để trả về HTML
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", index_html, processor);
   });
 
-  // Cấu hình server để trả về nhiệt độ
   server.on("/temperature", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/plain", readDHTTemperature().c_str());
   });
 
-  // Cấu hình server để trả về độ ẩm
   server.on("/humidity", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/plain", readDHTHumidity().c_str());
   });
 
-  // Bắt đầu chạy server
+  // Start the web server
   server.begin();
 }
 
 void loop() {
-  // Đọc dữ liệu từ cảm biến DHT
-  String humidityStr = readDHTHumidity();
-  String temperatureStr = readDHTTemperature();
+  unsigned long currentMillis = millis();  
 
-  // Hiển thị trạng thái trên LCD
-  lcd.clear();
-  if (humidityStr == "--" || temperatureStr == "--") {
-    lcd.setCursor(0, 0);
-    lcd.print("Failed to read");
-    lcd.setCursor(0, 1);
-    lcd.print("DHT sensor!");
-    Serial.println("Failed to read from DHT sensor");
-  } else {
-    // lcd.setCursor(0, 0);
-    // lcd.print("Temp: ");
-    // lcd.print(temperatureStr);
-    // lcd.print("C");
-    // lcd.setCursor(0, 1);
-    // lcd.print("Humi: ");
-    // lcd.print(humidityStr);
-    // lcd.print("%");
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;  
 
-    float temperature = temperatureStr.toFloat();
-    if (temperature < 25) {
-      setColor(HIGH, HIGH, LOW); // (blue)
-      lcd.setCursor(2, 0);
-      lcd.print("Temp too cold");
-    } else if (temperature > 30) {
-      flashColor(LOW, HIGH, HIGH, 200);
-      setColor(LOW, HIGH, HIGH); // (red)
-      lcd.setCursor(2, 0);
-      lcd.print("Temp too hot");
+    // Read data from DHT sensor
+    String humidityStr = readDHTHumidity();
+    String temperatureStr = readDHTTemperature();
+
+    // Display data on LCD
+    lcd.clear();
+    if (humidityStr == "--" || temperatureStr == "--") {
+      lcd.setCursor(0, 0);
+      lcd.print("Failed to read");
+      lcd.setCursor(0, 1);
+      lcd.print("DHT sensor!");
+      Serial.println("Failed to read from DHT sensor");
     } else {
-      setColor(HIGH, LOW, HIGH); // (green)
-      lcd.setCursor(2, 0);
-      lcd.print("Temp normal");
+      float temperature = temperatureStr.toFloat();
+      if (temperature < 25) {
+        setColor(HIGH, HIGH, LOW); 
+        lcd.setCursor(2, 0);
+        lcd.print("Temp too cold");
+      } else if (temperature > 30) {
+        setColor(LOW, HIGH, HIGH); 
+        lcd.setCursor(2, 0);
+        lcd.print("Temp too hot");
+      } else {
+        setColor(HIGH, LOW, HIGH); 
+        lcd.setCursor(2, 0);
+        lcd.print("Temp normal");
+      }
     }
-
   }
 
-  // Delay 2 giây để cập nhật lại thông tin trên LCD
-  delay(2000);
+  // Check Wi-Fi connection every 3 seconds
+  if (currentMillis - lastWiFiCheck >= WiFiCheckInterval) {
+    lastWiFiCheck = currentMillis;
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("Reconnecting to WiFi...");
+      WiFi.reconnect();
+    } else {
+      Serial.println(WiFi.localIP());
+    }
+  }
 }
